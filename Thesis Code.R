@@ -20,9 +20,12 @@ adni_dict <- read.delim("ADNIMERGE_DICT.csv", sep =',')
 postproc <- read.delim("Biospecimen_Results/ADMC_BA_POSTPROC_06_28_18.csv", sep = ',', stringsAsFactors = FALSE)
 postproc_dict <- read.delim("Biospecimen_Results/ADMC_BA_POSTPROC_06_28_18_DICT.csv", sep = ',', stringsAsFactors = FALSE)
 
+
 # Initial number of participants in ADNIMERGE & Postproc:
 count(distinct(adnimerge, RID)) #2231
 count(distinct(postproc, RID)) #1671
+
+group_by(adnimerge, RID) %>% summarise(n_distinct(RID))
 
 z <- adnimerge[which(adnimerge$RID %in% postproc$RID),]
 count(distinct(z,RID))
@@ -35,7 +38,7 @@ adnimerge2 <- adnimerge[ , c(1,3,8:11,15,19:21,60,103:105,109:112)] %>%
   mutate(DX_bl = ifelse(DX_bl == "LMCI"|DX_bl == "EMCI", 'MCI', DX_bl)) %>%
   arrange(RID,VISCODE)
 
-names(adnimerge2)
+#count(distinct(adnimerge2, RID))
 
 # Remove patients with SMC and include only those with data avail for three years
 #table(postproc2$SUBJECT_FLAG)
@@ -55,7 +58,7 @@ adnimerge2 <- adnimerge2 %>%
 #postproc_dict %>% filter(FLDNAME == "TLCA_CDCA_LOGTRANSFORMFLAG") %>% select(TEXT) 
 
 # Merge data & rename variables
-total <- left_join(adnimerge2, postproc2, by = c("RID", "VISCODE")) %>% 
+total <- left_join(adnimerge2,postproc2, by = c("RID", "VISCODE")) %>% 
   rename("GENDER" = PTGENDER, "EDUCATION" = PTEDUCAT) %>% arrange(RID, VISCODE)
 
 total$GENDER <-  as.factor(total$GENDER)
@@ -68,9 +71,10 @@ count(distinct(postproc2,RID)) #1671
 # Only participants with BA info available 
 final <- total[which(total$RID %in% postproc2$RID),]
 
+#`%not in%` <- function (x, table) is.na(match(x, table, nomatch=NA_integer_))
+
 # Final number of participants:
 count(distinct(final,RID)) #738
-
 
 # Distribution of Baseline Diagnosis:
 bl_distribution <- final %>% 
@@ -89,14 +93,14 @@ MCI_convert <- filter(final, DX == "Dementia" & DX_bl == "MCI")
 count(distinct(MCI_convert,RID))
 
 # Diagnosis of MCI patients at m36
-MCI <- final %>% filter(DX_bl == 'MCI') 
+MCI_patients <- final %>% filter(DX_bl == 'MCI') 
 #count(distinct(MCI,RID))
 
-MCI_DX <- MCI %>% filter(VISCODE == "m36") %>% select(DX)
+MCI_DX <- MCI_patients %>% filter(VISCODE == "m36") %>% select(DX)
 table(MCI_DX) #10 empty values 
 
 # Remove NAs for now
-MCI <- MCI %>% group_by(RID) %>% filter(DX != "")
+#MCI_patients <- MCI_patients %>% group_by(RID) %>% filter(DX != "")
 
 # Check if CSF measures are available at M36 
 CSF_check <- final %>% filter(DX_bl == 'MCI') %>% filter(VISCODE== 'm36')
@@ -105,17 +109,17 @@ dim(CSF_check[CSF_check$ABETA == '',])[1]  #490 missing values
 
 
 # Create Conversion Variable
-MCI <- group_by(MCI, RID) %>% 
+MCI_patients <- group_by(MCI_patients, RID) %>% 
   mutate(Convert = ifelse(DX == "Dementia", 1, 0)) %>%
   ungroup()
 
-MCI$Convert <- as.factor(MCI$Convert)
+MCI_patients$Convert <- as.factor(MCI_patients$Convert)
 
-check <- select(MCI, RID,VISCODE, DX, Convert)
+check <- select(MCI_patients, RID,VISCODE, DX, Convert)
 
 
 # MCI Baseline subset
-MCI_bl <- MCI %>% 
+MCI_bl <- MCI_patients %>% 
   filter(VISCODE == "bl") %>%
   select(RID, VISCODE, AGE, GENDER, EDUCATION, APOE4, CA:Convert)
 
@@ -125,9 +129,11 @@ MCI_bl <- MCI %>%
 # Look at correlation of mean values of each feature # 
 #MCI$GENDER <- as.factor(MCI$GENDER)
 
-predictors <- select(MCI, AGE, GENDER, EDUCATION, APOE4,DX,CA:Convert)
+predictors <- filter(MCI_patients, VISCODE == 'bl') %>%
+  select(AGE, GENDER, EDUCATION, APOE4,DX,CA:Convert)
+  
 predictors$DX <- as.factor(predictors$DX)
-lapply(predictors,levels)
+lapply(predictors[,c(2,5)],levels)
 
 predictors[] <- lapply(predictors,as.integer)
 cor(predictors)
@@ -139,9 +145,9 @@ correlation_plot <- corrplot(correlations, method = "circle",
 correlation_plot
 
 
-MCI[MCI$VISCODE== 'm36',]$DX == "Dementia"
+MCI_patients[MCI_patients$VISCODE== 'm36',]$DX == "Dementia"
 
-  MCI[VISCODE ==  'bl']$Final_DX <- 'Dementia'
+MCI_patients[VISCODE ==  'bl']$Final_DX <- 'Dementia'
 
 
 

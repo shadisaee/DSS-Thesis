@@ -23,18 +23,46 @@ count(distinct(adnimerge, RID)) #2231
 count(distinct(postproc, RID)) #1671
 count(distinct(vitals, RID)) #3282
 
-#z <- adnimerge[which(adnimerge$RID %in% postproc$RID),]
-#count(distinct(z,RID))
-#group_by(z, DX_bl) %>% summarise(n_distinct(RID))
+group_by(adnimerge2, DX_bl) %>% summarise(n_distinct(RID))  
+
 
 # Discard irrelevant variables 
 vitals2 <- vitals %>% select(RID, VISCODE, VSWEIGHT, VSWTUNIT, VSHEIGHT, VSHTUNIT)
-postproc2 <- postproc[ , -c(1,5:9,34:57)] 
-adnimerge2 <- adnimerge[ , c(1,3,8:11,15,19:21,60,103:105,109:110,112)] %>%
+postproc2 <- postproc[ ,-c(1,5:9,34:57)] 
+adnimerge2 <- adnimerge[ ,c(1,3,8:11,15,19:21,60,66,103:105,109:110,112)] %>%
   mutate(DX_bl = ifelse(DX_bl == "LMCI"|DX_bl == "EMCI", 'MCI', DX_bl)) %>%
   rename("GENDER" = PTGENDER, "EDUCATION" = PTEDUCAT) %>% 
   mutate(GENDER = as.factor(GENDER)) %>%
   arrange(RID, VISCODE)
+
+
+# Remove patients with SMC and include only patients with data available for three years
+adnimerge2 <- adnimerge2 %>% 
+  filter(DX_bl != 'SMC')  %>% 
+  filter(Years_bl <= 3.2) %>% 
+  group_by(RID) %>% 
+  mutate(max_data = (max(M))) %>%
+  filter(max_data == 36) %>%
+  select(-c(max_data, Years_bl)) %>%
+  ungroup(RID)
+
+# Also include MCI patients who converted to dementia earlier than three years
+MCI_converter_RID <- adnimerge %>%
+  mutate(DX_bl = ifelse(DX_bl == "LMCI"|DX_bl == "EMCI", 'MCI', DX_bl)) %>%
+  filter(DX_bl == "MCI") %>%
+  filter(Years_bl <= 3.2) %>% 
+  filter(DX == "Dementia") %>%
+  pull(RID)
+
+MCI_converters <- adnimerge %>%
+  filter(RID %in% MCI_converter_RID) %>%
+  filter(Years_bl <= 3.2) %>% 
+  select(-Years_bl) %>% select(RID,VISCODE,DX) %>%
+  arrange(RID,VISCODE)
+
+`%not in%` <- function (x, table) is.na(match(x, table, nomatch=NA_integer_))
+length(unique(MCI_converters[MCI_converters$RID %not in% adnimerge2$RID,1]))
+
 
 # Process info for BMI meausure 
 bmi <- vitals2 %>% 
@@ -71,41 +99,23 @@ bmi <- bmi %>%
   mutate(VISCODE = "bl") %>%
   select(-c(VSHTUNIT,VSWTUNIT))
 
-
-# Remove patients with SMC and include only those with data available for three years
-group_by(adnimerge2, DX_bl) %>% summarise(n_distinct(RID))   
-  
-adnimerge2 <- adnimerge2 %>% 
-  filter(DX_bl != 'SMC')  %>% 
-  filter(Years_bl <= 3.2) %>% 
-  group_by(RID) %>% 
-  mutate(max_data = (max(M))) %>%
-  filter(max_data == 36) %>%
-  select(-c(max_data, Years_bl)) %>%
-  ungroup(RID)
-
 #postproc2 <- filter(postproc2, SUBJECT_FLAG != 1)  #107
 #postproc_dict %>% filter(FLDNAME == 'SUBJECT_FLAG') %>% select(TEXT) 
 #postproc_dict %>% filter(FLDNAME == "TLCA_CDCA_LOGTRANSFORMFLAG") %>% select(TEXT) 
 
 # Merge data 
 total <- adnimerge2 %>%
-  left_join(bmi, c("RID", "VISCODE")) %>%
+  left_join(bmi, by = c("RID", "VISCODE")) %>%
   left_join(postproc2, by = c("RID", "VISCODE")) %>% 
   arrange(RID, VISCODE)
   
 count(distinct(total,RID)) #765
 
 # Only participants with BA info available 
-final <- total[which(total$RID %in% postproc2$RID),]
-
-vitalna <- total %>% 
-  filter(VISCODE == "bl") %>% 
-  sum(is.na(bmi)) #%>%
-  #count(is.na(VSHEIGHT)) 
+final <- total[total$RID %in% postproc2$RID,]
 
 
-#`%not in%` <- function (x, table) is.na(match(x, table, nomatch=NA_integer_))
+
 
 # Final number of participants:
 count(distinct(final,RID)) #738
@@ -116,40 +126,44 @@ bl_distribution <- final %>%
   summarise(n_distinct(RID))
 bl_distribution
 
-# Distribution of Final Diagnosis: 
+# Distribution of Diagnosis at 3 years: 
 m36_distribution <- final %>% 
   filter(VISCODE == "m36") %>% 
   group_by(DX) %>% 
   summarise(n_distinct(RID))
 m36_distribution
 
-MCI_convert <- filter(final, DX == "Dementia" & DX_bl == "MCI")
-count(distinct(MCI_convert,RID))
-
-# Diagnosis of MCI patients at m36
+# Distribution of Diagnosis of only MCI patients at three years
 MCI_patients <- final %>% filter(DX_bl == 'MCI') 
-#count(distinct(MCI,RID))
-
-MCI_DX <- MCI_patients %>% filter(VISCODE == "m36") %>% select(DX)
-table(MCI_DX) #10 empty values 
-
-# Remove NAs for now
-#MCI_patients <- MCI_patients %>% group_by(RID) %>% filter(DX != "")
-
-# Check if CSF measures are available at M36 
-CSF_check <- final %>% filter(DX_bl == 'MCI') %>% filter(VISCODE== 'm36')
-
-dim(CSF_check[CSF_check$ABETA == '',])[1]  #490 missing values
-
+MCI_DX <- MCI_patients %>% 
+  filter(VISCODE == "m36") %>% 
+  group_by(DX) %>% 
+  summarise(n_distinct(RID))
+MCI_DX
 
 # Create Conversion Variable
 MCI_patients <- group_by(MCI_patients, RID) %>% 
   mutate(Convert = ifelse(DX == "Dementia", 1, 0)) %>%
   ungroup()
 
-MCI_patients$Convert <- as.factor(MCI_patients$Convert)
+create_convert <- function(df){
+  for (i in unique(df$RID)){
+    if (any(df[df$RID == i,11] == "Dementia")){
+      df[df$RID ==i,46] <- 1
+    }
+  }
+  df
+}
 
-check <- select(MCI_patients, RID,VISCODE, DX, Convert)
+MCI_patients <- create_convert(MCI_patients) 
+MCI_patients$Convert <- as.factor(convert_created$Convert)
+
+# Check if CSF measures are available at M36 
+CSF_NA_check <- final %>% filter(DX_bl == 'MCI') %>% filter(VISCODE== 'm36')
+dim(CSF_NA_check[CSF_NA_check$ABETA == '',])[1]  #490 missing values
+
+
+
 
 
 # MCI Baseline subset
